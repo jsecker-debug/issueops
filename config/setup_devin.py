@@ -75,8 +75,8 @@ KNOWLEDGE_NOTES = [
 
 PLAYBOOKS = [
     {
-        "name": "Issue Triage",
-        "instructions": (
+        "title": "Issue Triage",
+        "body": (
             "Triage a GitHub issue using the following steps:\n\n"
             "1. **Understand the issue** — Read the title, description, and any linked discussions or screenshots. "
             "Identify what the reporter expects vs. what is happening.\n\n"
@@ -97,8 +97,8 @@ PLAYBOOKS = [
         ),
     },
     {
-        "name": "Issue Fix",
-        "instructions": (
+        "title": "Issue Fix",
+        "body": (
             "Fix a GitHub issue starting from the triage report:\n\n"
             "1. **Review the triage report** — Read the triage comment on the issue to understand the root cause, "
             "affected files, and suggested fix approach.\n\n"
@@ -123,13 +123,14 @@ PLAYBOOKS = [
 # ---------------------------------------------------------------------------
 
 SCHEDULE = {
+    "name": "Daily Issue Triage Sweep",
     "prompt": (
         "Scan the GitHub issue tracker for untriaged issues older than 7 days. "
         "Assess the top 10 by priority and recency. For each issue, post a summary comment "
         "with an initial classification (category, complexity, confidence) and suggested next steps. "
         "If an issue already has a triage comment, skip it."
     ),
-    "cron_schedule": "0 8 * * 1-5",
+    "frequency": "0 8 * * 1-5",
     "timezone": "America/New_York",
 }
 
@@ -153,7 +154,8 @@ def main() -> None:
     # --- Playbooks ---
     print("\nCreating playbooks...")
     for playbook in PLAYBOOKS:
-        create_resource("playbooks", playbook, f"playbook '{playbook['name']}'")
+        create_resource("playbooks", playbook, f"playbook '{playbook['title']}'")
+
 
     # --- Schedule ---
     print("\nCreating schedule...")
