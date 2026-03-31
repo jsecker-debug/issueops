@@ -23,16 +23,19 @@ jobs:
       - name: Call IssueOps backend
         env:
           ISSUEOPS_BACKEND_URL: ${{ secrets.ISSUEOPS_BACKEND_URL }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            --arg sender "${{ github.actor }}" \
+            '{repository: $repo, issue_title: $title, issue_body: $body, sender: $sender}' | \
           curl -sf -X POST \
             "${ISSUEOPS_BACKEND_URL}/api/issues/${{ github.event.issue.number }}/${{ steps.action.outputs.action }}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "repository": "${{ github.repository }}",
-              "issue_title": ${{ toJSON(github.event.issue.title) }},
-              "issue_body": ${{ toJSON(github.event.issue.body) }},
-              "sender": "${{ github.actor }}"
-            }'
+            -d @-
 
   ## ─────────────────────────────────────────────────────────────────────
   ## Direct Devin API job (commented out)
@@ -63,10 +66,11 @@ jobs:
   #
   #     - name: Build prompt
   #       id: prompt
+  #       env:
+  #         ISSUE_TITLE: ${{ github.event.issue.title }}
+  #         ISSUE_BODY: ${{ github.event.issue.body }}
   #       run: |
   #         ACTION="${{ steps.action.outputs.action }}"
-  #         ISSUE_TITLE=$(echo '${{ toJSON(github.event.issue.title) }}')
-  #         ISSUE_BODY=$(echo '${{ toJSON(github.event.issue.body) }}')
   #
   #         if [ "$ACTION" = "triage" ]; then
   #           PROMPT="Triage GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.\n\nTitle: ${ISSUE_TITLE}\n\nBody: ${ISSUE_BODY}\n\nClassify the issue by category, complexity, and confidence. Add appropriate labels and a summary comment."
@@ -84,14 +88,12 @@ jobs:
   #       run: |
   #         PROMPT=$(cat /tmp/devin_prompt.txt)
   #
+  #         jq -n \
+  #           --arg prompt "$PROMPT" \
+  #           --arg org_id "$DEVIN_ORG_ID" \
+  #           '{prompt: $prompt, organization_id: $org_id}' | \
   #         curl -sf -X POST \
   #           "https://api.devin.ai/v1/sessions" \
   #           -H "Authorization: Bearer ${DEVIN_API_KEY}" \
   #           -H "Content-Type: application/json" \
-  #           -d "$(jq -n \
-  #             --arg prompt "$PROMPT" \
-  #             --arg org_id "$DEVIN_ORG_ID" \
-  #             '{
-  #               "prompt": $prompt,
-  #               "organization_id": $org_id
-  #             }')"
+  #           -d @-
