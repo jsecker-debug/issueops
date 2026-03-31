@@ -1,0 +1,97 @@
+name: IssueOps Triage & Fix
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.label.name == 'devin-triage' ||
+      github.event.label.name == 'devin-fix'
+    steps:
+      - name: Determine action
+        id: action
+        run: |
+          if [ "${{ github.event.label.name }}" = "devin-triage" ]; then
+            echo "action=triage" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=fix" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call IssueOps backend
+        env:
+          ISSUEOPS_BACKEND_URL: ${{ secrets.ISSUEOPS_BACKEND_URL }}
+        run: |
+          curl -sf -X POST \
+            "${ISSUEOPS_BACKEND_URL}/api/issues/${{ github.event.issue.number }}/${{ steps.action.outputs.action }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "issue_title": ${{ toJSON(github.event.issue.title) }},
+              "issue_body": ${{ toJSON(github.event.issue.body) }},
+              "sender": "${{ github.actor }}"
+            }'
+
+  ## ─────────────────────────────────────────────────────────────────────
+  ## Direct Devin API job (commented out)
+  ##
+  ## A simpler alternative that calls the Devin API directly without
+  ## needing the IssueOps backend service. Uncomment this job (and
+  ## optionally comment out the "dispatch" job above) if you want a
+  ## quick, standalone setup.
+  ##
+  ## Required repository secrets:
+  ##   DEVIN_API_KEY  – your Devin API key
+  ##   DEVIN_ORG_ID   – your Devin organization ID
+  ## ─────────────────────────────────────────────────────────────────────
+  # direct:
+  #   runs-on: ubuntu-latest
+  #   if: >-
+  #     github.event.label.name == 'devin-triage' ||
+  #     github.event.label.name == 'devin-fix'
+  #   steps:
+  #     - name: Determine action
+  #       id: action
+  #       run: |
+  #         if [ "${{ github.event.label.name }}" = "devin-triage" ]; then
+  #           echo "action=triage" >> "$GITHUB_OUTPUT"
+  #         else
+  #           echo "action=fix" >> "$GITHUB_OUTPUT"
+  #         fi
+  #
+  #     - name: Build prompt
+  #       id: prompt
+  #       run: |
+  #         ACTION="${{ steps.action.outputs.action }}"
+  #         ISSUE_TITLE=$(echo '${{ toJSON(github.event.issue.title) }}')
+  #         ISSUE_BODY=$(echo '${{ toJSON(github.event.issue.body) }}')
+  #
+  #         if [ "$ACTION" = "triage" ]; then
+  #           PROMPT="Triage GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.\n\nTitle: ${ISSUE_TITLE}\n\nBody: ${ISSUE_BODY}\n\nClassify the issue by category, complexity, and confidence. Add appropriate labels and a summary comment."
+  #         else
+  #           PROMPT="Fix GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.\n\nTitle: ${ISSUE_TITLE}\n\nBody: ${ISSUE_BODY}\n\nAnalyse the issue, implement a fix, and open a pull request."
+  #         fi
+  #
+  #         # Store prompt in a file to avoid shell escaping issues
+  #         echo "$PROMPT" > /tmp/devin_prompt.txt
+  #
+  #     - name: Call Devin API
+  #       env:
+  #         DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+  #         DEVIN_ORG_ID: ${{ secrets.DEVIN_ORG_ID }}
+  #       run: |
+  #         PROMPT=$(cat /tmp/devin_prompt.txt)
+  #
+  #         curl -sf -X POST \
+  #           "https://api.devin.ai/v1/sessions" \
+  #           -H "Authorization: Bearer ${DEVIN_API_KEY}" \
+  #           -H "Content-Type: application/json" \
+  #           -d "$(jq -n \
+  #             --arg prompt "$PROMPT" \
+  #             --arg org_id "$DEVIN_ORG_ID" \
+  #             '{
+  #               "prompt": $prompt,
+  #               "organization_id": $org_id
+  #             }')"
