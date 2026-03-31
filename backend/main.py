@@ -240,6 +240,130 @@ def parse_complexity(text: str) -> Optional[Complexity]:
 
 
 # ---------------------------------------------------------------------------
+# Prompt builders
+# ---------------------------------------------------------------------------
+
+
+def build_triage_prompt(
+    issue_number: int,
+    repo: str,
+    title: str,
+    body: str,
+    labels: list[str],
+) -> str:
+    """Build a detailed triage prompt for a Devin session."""
+    label_str = ", ".join(labels) if labels else "None"
+    return (
+        f"You are triaging GitHub issue #{issue_number} in the repository {repo}.\n"
+        f"\n"
+        f"## Issue context\n"
+        f"- **Number:** #{issue_number}\n"
+        f"- **Title:** {title}\n"
+        f"- **Labels:** {label_str}\n"
+        f"\n"
+        f"### Description\n"
+        f"{body}\n"
+        f"\n"
+        f"## Investigation steps\n"
+        f"1. **Search the codebase** for keywords from the issue title and body:\n"
+        f"   - Use `grep -rn` or `rg` to find relevant symbols, error messages, "
+        f"and identifiers.\n"
+        f"   - Run `git log --oneline -20` and `git log --all --oneline --grep=\"<keyword>\"` "
+        f"to check recent commits for related changes.\n"
+        f"   - Read test files in the affected area to understand expected behaviour.\n"
+        f"   - Inspect any stack traces or error strings mentioned in the issue.\n"
+        f"2. **Check for duplicates** — search closed issues and PRs for similar "
+        f"titles or error messages to see if this was previously fixed or discussed.\n"
+        f"3. Identify the **root cause** and all **affected files** (full paths).\n"
+        f"\n"
+        f"## Required output format\n"
+        f"Return a structured triage report with **exactly** these sections:\n"
+        f"\n"
+        f"### Root Cause\n"
+        f"A concise explanation of why the issue occurs.\n"
+        f"\n"
+        f"### Affected Files\n"
+        f"A bullet list of every file path that would need changes, e.g.:\n"
+        f"- `src/module/foo.py` — brief reason\n"
+        f"\n"
+        f"### Complexity: <low | medium | high>\n"
+        f"Classify the fix effort:\n"
+        f"- **low** — isolated change in one or two files, no API/schema changes.\n"
+        f"- **medium** — touches several files or requires moderate refactoring.\n"
+        f"- **high** — cross-cutting change, new dependencies, or design decisions needed.\n"
+        f"\n"
+        f"### Confidence: <\U0001f7e2 | \U0001f7e0 | \U0001f534>\n"
+        f"- \U0001f7e2 High — root cause is clear and fix is straightforward.\n"
+        f"- \U0001f7e0 Medium — likely root cause identified but some uncertainty remains.\n"
+        f"- \U0001f534 Low — root cause is unclear or issue may be environment-specific.\n"
+        f"\n"
+        f"### Suggested Fix Approach\n"
+        f"Step-by-step outline of what the fix should do.\n"
+        f"\n"
+        f"### Risks & Side Effects\n"
+        f"Anything that could break, edge cases to watch, or areas needing extra testing.\n"
+        f"\n"
+        f"### Duplicate / Related Issues\n"
+        f"List any closed or open issues/PRs that are related, or state \"None found\".\n"
+    )
+
+
+def build_fix_prompt(
+    issue_number: int,
+    repo: str,
+    title: str,
+    body: str,
+    triage_summary: str,
+) -> str:
+    """Build a detailed fix prompt for a Devin session."""
+    return (
+        f"You are fixing GitHub issue #{issue_number} in the repository {repo}.\n"
+        f"\n"
+        f"## Issue context\n"
+        f"- **Number:** #{issue_number}\n"
+        f"- **Title:** {title}\n"
+        f"\n"
+        f"### Description\n"
+        f"{body}\n"
+        f"\n"
+        f"## Triage summary (already completed — do NOT redo investigation)\n"
+        f"{triage_summary}\n"
+        f"\n"
+        f"## Instructions\n"
+        f"\n"
+        f"### Branch & commits\n"
+        f"- Create a branch named **`fix/{issue_number}-<short-description>`** from the "
+        f"default branch (e.g. `fix/{issue_number}-handle-null-input`).\n"
+        f"- Use lowercase kebab-case for the short description.\n"
+        f"- Keep commits small and focused.\n"
+        f"\n"
+        f"### Implementation guardrails\n"
+        f"- **Only touch files related to this issue.** Do not refactor, reformat, or "
+        f"modify unrelated code.\n"
+        f"- **Prefer the simplest correct fix.** Avoid over-engineering.\n"
+        f"- Write or update tests to cover the fix. If no test framework exists, add a "
+        f"minimal regression test.\n"
+        f"- If you encounter a blocker (missing context, ambiguous requirements, "
+        f"external dependency), document it clearly in the PR description instead "
+        f"of guessing.\n"
+        f"\n"
+        f"### Pre-PR checklist\n"
+        f"Before opening the pull request you **must** run and pass:\n"
+        f"1. **Lint** — run the project linter (e.g. `ruff`, `eslint`, `flake8`).\n"
+        f"2. **Type check** — run the type checker if configured (e.g. `mypy`, `pyright`, `tsc`).\n"
+        f"3. **Tests** — run the full test suite and confirm no regressions.\n"
+        f"\n"
+        f"### Pull request requirements\n"
+        f"- **Title format:** `fix: #{issue_number} \u2014 <short description>`\n"
+        f"- In the PR body:\n"
+        f"  - Reference the issue with `Closes #{issue_number}`.\n"
+        f"  - Summarise what was changed and why.\n"
+        f"  - Note any risks, follow-ups, or things reviewers should pay attention to.\n"
+        f"- Do **not** merge the PR yourself.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Triage flow
 # ---------------------------------------------------------------------------
 
@@ -266,22 +390,12 @@ async def run_triage(issue_number: int) -> None:
         issue_body = gh_issue.get("body", "") or "No description provided."
         issue_labels = [l["name"] for l in gh_issue.get("labels", [])]
 
-        prompt = (
-            f"Triage GitHub issue #{issue_number} in the repository {GITHUB_REPO}.\n\n"
-            f"**Title:** {issue.title}\n\n"
-            f"**Body:**\n{issue_body}\n\n"
-            f"**Labels:** {', '.join(issue_labels) if issue_labels else 'None'}\n\n"
-            "Please analyze this issue and provide a structured triage report including:\n"
-            "1. Summary of the issue\n"
-            "2. Root cause analysis (search the codebase)\n"
-            "3. Affected files and packages\n"
-            "4. Suggested fix approach\n"
-            "5. Classification:\n"
-            "   - Category: bug | feature | refactor\n"
-            "   - Complexity: low | medium | high\n"
-            "   - Confidence: green | yellow | red\n"
-            "6. Any open questions or blockers\n\n"
-            "Format the complexity line as 'Complexity: <level>' so it can be parsed."
+        prompt = build_triage_prompt(
+            issue_number=issue_number,
+            repo=GITHUB_REPO,
+            title=issue.title,
+            body=issue_body,
+            labels=issue_labels,
         )
 
         # Create Devin session
@@ -366,18 +480,12 @@ async def run_fix(issue_number: int) -> None:
 
         triage_summary = issue.triage_summary or "No triage summary available."
 
-        prompt = (
-            f"Fix GitHub issue #{issue_number} in the repository {GITHUB_REPO}.\n\n"
-            f"**Title:** {issue.title}\n\n"
-            f"**Body:**\n{issue_body}\n\n"
-            f"**Triage Summary:**\n{triage_summary}\n\n"
-            "Based on the triage report above, implement a fix for this issue:\n"
-            "1. Create a feature branch from main\n"
-            "2. Make the minimal, correct fix\n"
-            "3. Write or update tests to cover the fix\n"
-            "4. Run lint and type checks\n"
-            "5. Open a pull request that references this issue\n\n"
-            f"Reference the issue as #{issue_number} in your PR title and description."
+        prompt = build_fix_prompt(
+            issue_number=issue_number,
+            repo=GITHUB_REPO,
+            title=issue.title,
+            body=issue_body,
+            triage_summary=triage_summary,
         )
 
         # Create Devin session
